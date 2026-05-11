@@ -1,0 +1,57 @@
+name: Test ProxyIP (Remote Source)
+
+on:
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: "国家代码 (逗号分隔, 例: SG 或 SG,JP,US)"
+        required: false
+        default: "SG"
+      concurrency:
+        description: "并发数"
+        required: false
+        default: "30"
+      timeout:
+        description: "单请求超时秒数"
+        required: false
+        default: "6"
+      limit:
+        description: "只取前 N 个 (0=全部, 调试用)"
+        required: false
+        default: "0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python (from pyproject.toml)
+        run: uv python install
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run remote ProxyIP test
+        run: |
+          uv run test_remote.py \
+            -C "${{ inputs.countries }}" \
+            -c "${{ inputs.concurrency }}" \
+            -t "${{ inputs.timeout }}" \
+            --limit "${{ inputs.limit }}" \
+            -o "proxyip_report_${{ inputs.countries }}.csv"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: proxyip-report-${{ inputs.countries }}
+          path: proxyip_report_*.csv
+          retention-days: 14
