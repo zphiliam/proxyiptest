@@ -39,9 +39,23 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
+      - name: Fetch ProxyIP source (via curl)
+        run: |
+          set -euo pipefail
+          # CF 会拦 aiohttp 的 TLS 指纹,用 curl 抓下来给 Python 读
+          curl -fsSL \
+            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            -H "Accept: application/json,*/*" \
+            -o all.json \
+            "https://zip.cm.edu.kg/all.json"
+          echo "Fetched $(wc -c < all.json) bytes"
+          head -c 200 all.json
+          echo
+
       - name: Run remote ProxyIP test
         run: |
           uv run test_remote.py \
+            --input-json all.json \
             -C "${{ inputs.countries }}" \
             -c "${{ inputs.concurrency }}" \
             -t "${{ inputs.timeout }}" \

@@ -16,6 +16,7 @@
 
 import argparse
 import asyncio
+import json
 import sys
 
 import aiohttp
@@ -25,15 +26,39 @@ from main import run_tests
 DEFAULT_SOURCE_URL = "https://zip.cm.edu.kg/all.json"
 
 
+def filter_payload(payload: dict, countries: set[str], limit: int | None = None) -> list[tuple[str, int]]:
+    """按国家代码过滤 JSON payload,展开为 [(ip, port), ...]"""
+    items: list[tuple[str, int]] = []
+    for entry in payload.get("data", []):
+        meta = entry.get("meta") or {}
+        country = meta.get("country", "")
+        if countries and country not in countries:
+            continue
+        ip = entry.get("ip")
+        ports = entry.get("port") or [443]
+        if not ip:
+            continue
+        for port in ports:
+            try:
+                items.append((ip, int(port)))
+            except (TypeError, ValueError):
+                continue
+    if limit and limit > 0:
+        items = items[:limit]
+    return items
+
+
 async def fetch_proxyips(url: str, countries: set[str], limit: int | None = None) -> list[tuple[str, int]]:
     """拉取远程 JSON,展开为 [(ip, port), ...],按国家代码过滤。"""
-    # 数据源对默认 aiohttp UA 返回 403,用 curl 的 UA 绕过
+    # 数据源对默认 aiohttp UA 返回 403,用 curl 的 UA 绕过(住宅 IP 下有效;
+    # 数据中心 IP 如 GitHub Actions 仍可能被 Cloudflare 拦截,改用 --input-json)
     headers = {"User-Agent": "curl/8.7.1"}
     timeout = aiohttp.ClientTimeout(total=60)
     async with aiohttp.ClientSession(timeout=timeout, headers=headers) as s:
         async with s.get(url) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
+    return filter_payload(payload, countries, limit)
 
     items: list[tuple[str, int]] = []
     for entry in payload.get("data", []):
@@ -66,6 +91,8 @@ async def main():
                         help="国家代码,逗号分隔(默认 SG)。例: SG / SG,JP,US。空字符串表示不过滤")
     parser.add_argument("-u", "--url", default=DEFAULT_SOURCE_URL,
                         help=f"数据源 URL(默认 {DEFAULT_SOURCE_URL})")
+    parser.add_argument("--input-json", default="",
+                        help="从本地 JSON 文件读取(跳过 HTTP 抓取,用于 GH Actions 等被 CF 拦的环境)")
     parser.add_argument("-o", "--output", default="proxyip_report.csv",
                         help="输出 CSV 路径(默认 proxyip_report.csv)")
     parser.add_argument("-c", "--concurrency", type=int, default=30,
@@ -77,14 +104,25 @@ async def main():
     args = parser.parse_args()
 
     countries = {c.strip().upper() for c in args.countries.split(",") if c.strip()}
-    label = f"(来源 {args.url}, 过滤 {','.join(sorted(countries)) or '不过滤'})"
 
-    print(f"⬇  正在拉取节点列表: {args.url}")
-    try:
-        proxyips = await fetch_proxyips(args.url, countries, args.limit or None)
-    except Exception as e:
-        print(f"❌ 拉取失败: {type(e).__name__}: {e}", file=sys.stderr)
-        sys.exit(1)
+    if args.input_json:
+        label = f"(来源 {args.input_json}, 过滤 {','.join(sorted(countries)) or '不过滤'})"
+        print(f"📂 从本地文件读取: {args.input_json}")
+        try:
+            with open(args.input_json, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            proxyips = filter_payload(payload, countries, args.limit or None)
+        except Exception as e:
+            print(f"❌ 读取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        label = f"(来源 {args.url}, 过滤 {','.join(sorted(countries)) or '不过滤'})"
+        print(f"⬇  正在拉取节点列表: {args.url}")
+        try:
+            proxyips = await fetch_proxyips(args.url, countries, args.limit or None)
+        except Exception as e:
+            print(f"❌ 拉取失败: {type(e).__name__}: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if not proxyips:
         print(f"❌ 过滤后没有节点(国家={countries})", file=sys.stderr)
