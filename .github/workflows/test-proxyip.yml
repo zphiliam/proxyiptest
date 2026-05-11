@@ -1,12 +1,12 @@
-name: Test ProxyIP (Remote Source)
+name: Test ProxyIP (SG)
 
 on:
   workflow_dispatch:
     inputs:
-      countries:
-        description: "国家代码 (逗号分隔, 例: SG 或 SG,JP,US)"
+      input_file:
+        description: "节点列表文件(仓库内路径)"
         required: false
-        default: "SG"
+        default: "SG.txt"
       concurrency:
         description: "并发数"
         required: false
@@ -15,10 +15,6 @@ on:
         description: "单请求超时秒数"
         required: false
         default: "6"
-      limit:
-        description: "只取前 N 个 (0=全部, 调试用)"
-        required: false
-        default: "0"
 
 jobs:
   test:
@@ -39,33 +35,17 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
-      - name: Fetch ProxyIP source (via curl)
+      - name: Run ProxyIP test
         run: |
-          set -euo pipefail
-          # CF 会拦 aiohttp 的 TLS 指纹,用 curl 抓下来给 Python 读
-          curl -fsSL \
-            -A "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
-            -H "Accept: application/json,*/*" \
-            -o all.json \
-            "https://zip.cm.edu.kg/all.json"
-          echo "Fetched $(wc -c < all.json) bytes"
-          head -c 200 all.json
-          echo
-
-      - name: Run remote ProxyIP test
-        run: |
-          uv run test_remote.py \
-            --input-json all.json \
-            -C "${{ inputs.countries }}" \
+          uv run main.py "${{ inputs.input_file }}" \
             -c "${{ inputs.concurrency }}" \
             -t "${{ inputs.timeout }}" \
-            --limit "${{ inputs.limit }}" \
-            -o "proxyip_report_${{ inputs.countries }}.csv"
+            -o "proxyip_report.csv"
 
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: proxyip-report-${{ inputs.countries }}
-          path: proxyip_report_*.csv
+          name: proxyip-report
+          path: proxyip_report.csv
           retention-days: 14
