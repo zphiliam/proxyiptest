@@ -27,8 +27,10 @@ DEFAULT_SOURCE_URL = "https://zip.cm.edu.kg/all.json"
 
 async def fetch_proxyips(url: str, countries: set[str], limit: int | None = None) -> list[tuple[str, int]]:
     """拉取远程 JSON,展开为 [(ip, port), ...],按国家代码过滤。"""
+    # 数据源对默认 aiohttp UA 返回 403,用 curl 的 UA 绕过
+    headers = {"User-Agent": "curl/8.7.1"}
     timeout = aiohttp.ClientTimeout(total=60)
-    async with aiohttp.ClientSession(timeout=timeout) as s:
+    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as s:
         async with s.get(url) as resp:
             resp.raise_for_status()
             payload = await resp.json(content_type=None)
